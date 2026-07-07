@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "feishu": {
+      "command": "bash",
+      "args": ["scripts/feishu-mcp.sh"]
+    }
+  }
+}
