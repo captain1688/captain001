@@ -1,0 +1,11 @@
+{
+  "name": "feishu-verification",
+  "version": "1.0.0",
+  "description": "Zero-dependency Feishu (Lark) event-subscription URL verification server",
+  "main": "feishu.js",
+  "scripts": {
+    "start": "node feishu.js",
+    "test": "node feishu.test.js"
+  },
+  "license": "MIT"
+}
