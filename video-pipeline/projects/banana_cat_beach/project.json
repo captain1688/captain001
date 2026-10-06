@@ -1,0 +1,35 @@
+{
+  "title": "香蕉猫 · 沙滩一画一毁（15秒）",
+  "_来源": "提示词原样取自分支 claude/nice-allen-pfv0w0 的 prompts/banana-cat-beach.md（提交 f1996ab）",
+  "model": "seedance-2.0-mini",
+  "resolution": "480p",
+  "size": "9:16",
+  "generate_audio": true,
+  "batch": "../../batches/main.batch.json",
+  "characters": {
+    "xiangjiaomao": {"name": "香蕉猫", "image": "asset:xiangjiaomao_main"},
+    "girl": {
+      "name": "人类小女孩",
+      "image": "refs/girl.png",
+      "generate": {
+        "model": "seedream-4.5",
+        "size": "3:4",
+        "resolution": "2K",
+        "prompt": "角色设定参考图：一个约6岁的人类小女孩，棕色双马尾，印花朵白色T恤，粉色短裤，白色凉鞋，右手提着一只蓝色小水桶；3D皮克斯动画电影风格，圆润可爱，大眼睛，皮肤通透，发丝有立体高光；全身正面站立，表情开心调皮；纯白色背景，柔和摄影棚光，高清细节；画面中只有她一个人，无文字，无水印，无其他物体。"
+      }
+    }
+  },
+  "segments": [
+    {"id": "seg1", "prompt_file": "seg1.txt", "duration": 15, "mode": "reference",
+     "characters": ["xiangjiaomao", "girl"]}
+  ],
+  "edit": {
+    "output": "final.mp4",
+    "original_volume": 1.0,
+    "bgm": "auto",
+    "bgm_mood": "搞笑",
+    "bgm_volume": 0.25,
+    "duck": true,
+    "loudnorm": true
+  }
+}

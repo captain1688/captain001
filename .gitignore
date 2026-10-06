@@ -14,3 +14,5 @@ video-pipeline/.cache/
 video-pipeline/batches/*.ledger.json
 video-pipeline/batches/*.ledger.json.lock
 video-pipeline/projects/example_v2/refs/*.png
+video-pipeline/projects/banana_cat_beach/refs/*.png
+video-pipeline/projects/*/refs/_old/

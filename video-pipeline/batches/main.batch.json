@@ -1,0 +1,18 @@
+{
+  "batch_id": "main",
+  "_说明": "主批次预算。limit 为 0 表示不允许花钱：请改成本批次上限；price 为 null 时一律拒绝提交，请到 apimart 核对单价后填写，currency 改成 apimart 实际扣费的币种。账本 main.batch.ledger.json 自动生成在本文件旁边（不进仓库）。",
+  "budget": {
+    "limit": 0,
+    "currency": "USD",
+    "max_repairs_per_segment": 1,
+    "max_repairs_total": 5,
+    "release_failed_without_cost": false,
+    "actual_cost_currency": null
+  },
+  "pricing": [
+    {"model": "seedance-2.0-mini", "resolution": "480p", "generate_audio": true, "unit": "second",
+     "price": null, "currency": "USD", "source": "https://apimart.ai/zh/model/doubao-seedance-2-0", "checked_at": null},
+    {"model": "seedream-4.5", "unit": "image",
+     "price": null, "currency": "USD", "source": "apimart Seedream-4.5 图片模型页", "checked_at": null}
+  ]
+}

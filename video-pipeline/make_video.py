@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vpipe import PIPELINE_VERSION, budget as budget_mod, config, edit, generate, narration, qc, state as st  # noqa: E402
+from vpipe import PIPELINE_VERSION, budget as budget_mod, config, edit, generate, narration, qc, refs, state as st  # noqa: E402
 from vpipe.util import FileLock, PipelineError, log, warn  # noqa: E402
 
 EXIT_OK, EXIT_ERROR, EXIT_PENDING, EXIT_QC_FAIL = 0, 1, 2, 3
@@ -35,7 +35,9 @@ def parse_args(argv=None):
     mode.add_argument("--tts-only", action="store_true", help="只合成旁白并检查词级时间戳")
     mode.add_argument("--edit-only", action="store_true", help="只用已有素材重剪并验收，不生成")
     mode.add_argument("--qc-only", action="store_true", help="只重新验收")
-    mode.add_argument("--resolve", metavar="SEG", help="人工核对后处理状态不明的 attempt")
+    mode.add_argument("--resolve", metavar="SEG", help="人工核对后处理状态不明的 attempt（分段 ID 或角色 ID）")
+    mode.add_argument("--make-refs", nargs="*", metavar="CHAR",
+                      help="生成 project.json 里带 generate 配置、还没有图的角色参考图（会花钱）；不写角色 ID 表示全部")
     ap.add_argument("--attempt", help="配合 --resolve：要处理的 attempt ID")
     res = ap.add_mutually_exclusive_group()
     res.add_argument("--task-id", help="配合 --resolve：在 apimart 控制台查到的任务号")
@@ -71,7 +73,8 @@ def _main(a):
     out_dir = project_dir / "output"
     out_dir.mkdir(exist_ok=True)
     needs_images = not (a.status or a.edit_only or a.qc_only or a.resolve or a.tts_only)
-    cfg = config.load_project(project_dir, check_images=needs_images)
+    cfg = config.load_project(project_dir, check_images=needs_images,
+                              allow_missing_generated=a.dry_run or a.make_refs is not None)
     budget = config.load_budget(project_dir, cfg, out_dir)
     ledger = budget_mod.Ledger(budget) if budget else None
     log(f"工程：{project_dir.name}｜{len(cfg['segments'])} 段，共 {sum(s['duration'] for s in cfg['segments'])} 秒｜"
@@ -93,7 +96,28 @@ def _main(a):
         st.save(out_dir, S)
 
         if a.resolve:
+            if a.resolve in cfg["_characters"] and a.resolve not in {s["id"] for s in cfg["segments"]}:
+                if not a.attempt or not (a.task_id or a.not_created):
+                    raise PipelineError("--resolve 需要同时给 --attempt 和（--task-id 或 --not-created）")
+                refs.resolve(S, a.resolve, a.attempt, a.task_id, a.not_created, out_dir, ledger)
+                log(f"已记录角色图 {a.resolve} 的核对结果。")
+                return EXIT_OK
             return resolve(cfg, out_dir, S, ledger, a)
+        if a.make_refs is not None:
+            from vpipe.api import Client
+            only = set(a.make_refs) or None
+            unknown = (only or set()) - {c for c, ch in cfg["_characters"].items() if ch.get("generate")}
+            if unknown:
+                raise PipelineError(f"这些角色没有 generate 配置，不能自动生成：{sorted(unknown)}")
+            client = Client(os.environ.get("APIMART_API_KEY", "").strip())
+            opts = {"authorize_retry": set(a.authorize_retry), "allow_regenerate": set(a.allow_regenerate),
+                    "max_wait": a.max_wait, "poll_interval": a.poll_interval}
+            done, msgs = refs.run(cfg, out_dir, S, client, budget, ledger, opts, only)
+            for m in msgs:
+                log(f"  ! {m}")
+            if done:
+                log("\n角色图都已就绪。请先打开 refs/ 人工确认长相，再预检和生成视频。")
+            return EXIT_OK if done else EXIT_PENDING
         if a.tts_only:
             narr = narration.synthesize(cfg, allow_tts=True)
             _report_tts(cfg, narr)
@@ -143,9 +167,34 @@ def dry_run(cfg, out_dir, budget, ledger, a):
                 att["status"] = "unknown"   # 只在内存里模拟恢复，不落盘
     log("\n角色参考：")
     for cid, c in cfg["_characters"].items():
-        log(f"  {cid}（{c['name']}）→ {c['path']}  {c['width']}x{c['height']}  sha256 {c['sha256'][:12]}…")
+        if c.get("missing"):
+            log(f"  {cid}（{c['name']}）→ {c['path']}  （还没生成）")
+        else:
+            log(f"  {cid}（{c['name']}）→ {c['path']}  {c['width']}x{c['height']}  sha256 {c['sha256'][:12]}…")
     if not cfg["_characters"]:
         log("  （未声明角色）")
+    gen_chars = {cid: ch for cid, ch in cfg["_characters"].items() if ch.get("generate")}
+    if gen_chars:
+        log("\n角色参考图生成（--make-refs）：")
+        S.setdefault("refs", {})
+        for cid, action, detail in refs.plan(cfg, S, {"authorize_retry": set(a.authorize_retry),
+                                                       "allow_regenerate": set(a.allow_regenerate)}):
+            gen = gen_chars[cid]["generate"]
+            line = f"  {cid}（{gen_chars[cid]['name']}）→ {gen['target'].name}｜{gen['model']} {gen['size']}"
+            if action == "new":
+                line += "\n      → 需要生成"
+                problems.append(f"角色 {cid} 的参考图还没生成：先运行 --make-refs {cid}（会花钱），人工确认长相后再生成视频")
+                if budget:
+                    try:
+                        p = config.price_for_image(budget, gen["model"])
+                        line += f"，预估 {p['estimate']:g} {p['currency']}"
+                    except PipelineError as e:
+                        problems.append(str(e))
+            else:
+                line += f"\n      → {action}：{detail}"
+                if action == "blocked":
+                    problems.append(f"角色 {cid}：{detail}")
+            log(line)
     log("\n分段计划：")
     opts = {"authorize_retry": set(a.authorize_retry), "allow_regenerate": set(a.allow_regenerate)}
     new_cost = 0.0

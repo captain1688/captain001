@@ -7,6 +7,8 @@
 
 1. **确认工程**：在 `video-pipeline/projects/<工程名>/`。新建工程照抄 `projects/example_v2/` 的结构。`seg*.txt` 原样粘贴用户给的提示词，不要改写。
 2. **确认素材**：角色参考图在本机，由 `video-pipeline/assets.local.json` 登记；首帧图在工程的 `refs/`。缺图就停下，告诉用户缺哪张，**不要自己编图，也不要改成纯文字生成**。
+   - 例外：`project.json` 里写了 `generate` 的角色（例如 `banana_cat_beach` 的 `girl`），可以用管线生成：`python video-pipeline/make_video.py video-pipeline/projects/<工程名> --make-refs <角色ID>`。这一步会花一张图的钱，**先征得用户同意**。生成后打开 `refs/` 里的图请用户确认长相，用户确认后才进入视频预检和生成。
+   - 除了 `--make-refs`，不要用任何其他方式（包括你自带的画图能力）生成或修改角色图、首帧图。
 3. **预检**：`python video-pipeline/make_video.py video-pipeline/projects/<工程名> --dry-run`。把输出里的角色对应、每段计划、预估费用、预算余额、问题清单告诉用户。
 4. **正式生成前必须得到用户明确同意**：告诉用户段数、总秒数、预估费用和批次余额，用户同意后才运行 `python video-pipeline/make_video.py video-pipeline/projects/<工程名>`。
 5. **交付**：
@@ -16,7 +18,7 @@
 
 ## 绝对不要做
 
-- 不要自行加 `--authorize-retry`、`--allow-regenerate`、`--allow-unaligned`。只有用户明确点名某一段、要求重试或重新生成时才加，而且只加那一段。
+- 不要自行加 `--authorize-retry`、`--allow-regenerate`、`--allow-unaligned`。只有用户明确点名某一段（或某个角色图）、要求重试或重新生成时才加，而且只加那一个。
 - 不要自行执行 `--resolve`。"状态不明"的任务要用户到 apimart 控制台核对后，告诉你任务号或"确认没有创建"，你再执行。
 - 不要删除、修改或手动编辑以下文件：
   - `output/state.json`

@@ -34,6 +34,7 @@ class MockApimart:
         self.dir = Path(workdir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.behaviors = list(behaviors or [])
+        self.image_behaviors = []
         self.duration = duration
         self.calls = []
         self.tasks = {}
@@ -46,6 +47,8 @@ class MockApimart:
         make_video(self.files / "black.mp4", duration, audio=True, color="color=c=black")
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=480x854",
                         "-frames:v", "1", str(self.files / "last.png")], check=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=pink:s=600x800",
+                        "-frames:v", "1", str(self.files / "gen.png")], check=True)
 
     # ------------------------------------------------------------ 服务器
     def start(self):
@@ -74,6 +77,20 @@ class MockApimart:
                     name = re.search(rb'filename="([^"]+)"', body)
                     return self._json({"url": f"{mock.base}/files/upload_{n}.png",
                                        "filename": name.group(1).decode() if name else "x"})
+                if self.path == "/v1/images/generations":
+                    payload = json.loads(body)
+                    with mock.lock:
+                        idx = len([c for c in mock.calls if c["type"] == "image_submit"])
+                        beh = (mock.image_behaviors[idx] if idx < len(mock.image_behaviors) else {"kind": "ok"})
+                        mock.calls.append({"type": "image_submit", "payload": payload, "behavior": beh["kind"]})
+                        tid = f"task_img_{idx + 1}"
+                        if beh["kind"] != "reject":
+                            mock.tasks[tid] = {"beh": {**beh, "image": True}, "polls": 0, "payload": payload}
+                    if beh["kind"] == "reject":
+                        return self._json({"error": {"code": 400, "message": "bad request (mock)"}}, 400)
+                    if beh["kind"] == "accept_then_502":
+                        return self._json({"error": "bad gateway (mock)"}, 502)
+                    return self._json({"code": 200, "data": [{"status": "submitted", "task_id": tid}]})
                 if self.path == "/v1/videos/generations":
                     payload = json.loads(body)
                     with mock.lock:
@@ -115,6 +132,10 @@ class MockApimart:
                 beh = t["beh"]
                 if t["polls"] < 2:
                     return self._json({"code": 200, "data": {"id": tid, "status": "processing", "progress": 50}})
+                if beh.get("image") and beh["kind"] in ("ok", "accept_then_502"):
+                    return self._json({"code": 200, "data": {"id": tid, "status": "completed", "progress": 100,
+                                                             "cost": 0.05, "result": {"images": [
+                                                                 {"url": [f"{mock.base}/files/gen.png"], "expires_at": 1}]}}})
                 if beh["kind"] == "fail":
                     return self._json({"code": 200, "data": {"id": tid, "status": "failed", "progress": 100,
                                                              "error": {"message": "mock failure"},
@@ -140,3 +161,6 @@ class MockApimart:
 
     def submits(self):
         return [c for c in self.calls if c["type"] == "submit"]
+
+    def image_submits(self):
+        return [c for c in self.calls if c["type"] == "image_submit"]

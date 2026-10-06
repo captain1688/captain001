@@ -17,7 +17,7 @@
 | `batch` | string | 提交时二选一 | 批次文件路径（相对工程目录），多条工程共用预算和账本 |
 | `budget` / `pricing` | object / array | 提交时二选一 | 单条工程自带预算（格式同批次文件），账本在 `output/budget.ledger.json` |
 | `assets_manifest` | string | 否 | 额外的本地素材清单路径 |
-| `characters` | object | 提交时需要 | `{角色ID: {"name": "显示名", "image": "工程内路径" 或 "asset:<key>"}}` |
+| `characters` | object | 提交时需要 | `{角色ID: {"name": "显示名", "image": "工程内路径" 或 "asset:<key>", "generate": 可选}}`。`generate` = `{"model", "prompt", "size", "resolution", "reference_images", "extra"}`，`image` 必须是工程内路径，由 `--make-refs` 生成到那里 |
 | `require_character_refs` | bool | 否 | 默认 `true`：每段必须声明出场角色才能提交；确实没有角色时设为 `false` |
 | `ref_legend` | bool | 否 | 参考图模式下自动在提示词前加"图N＝角色"，默认 `true` |
 | `ref_legend_template` | string | 否 | 默认 `【参考图对应】{items}。` |
@@ -99,6 +99,7 @@
 - `limit`：批次总上限，算法为"已花费 + 在途预占 + 本次"。
 - `max_repairs_per_segment`：每段最多再提交几次，包括 retry 和 regenerate，默认 0。`max_repairs_total` 为全批次上限，可不填。
 - `pricing` 按 `model`、`resolution` 匹配；若写了 `generate_audio`，也要求一致。`price` 为 `null` 时一律拒绝提交。
+- 角色参考图用 `unit: "image"` 的条目，例如 `{"model": "seedream-4.5", "unit": "image", "price": …, "currency": …}`，费用为每张单价。
 - `actual_cost_currency`：只有确认服务端返回的 `cost` 字段与预算同币种时才填，此时完成后按服务端费用记账，否则按估算记。
 - `release_failed_without_cost`：服务端失败且没给费用时是否释放预占，默认 `false`，即按已花费保守记账。
 
@@ -125,6 +126,8 @@
  "segments": {"seg1": {"attempts": [ <attempt>, ... ]}},
  "events": [{"at": "...", "event": "migrated_from_v1"}]}
 ```
+
+`refs`：`{角色ID: {"attempts": [ … ]}}`，记录角色参考图的生成尝试，字段同下方的 attempt。完成后会多出 `image`、`archive`、`image_sha256` 三个字段。
 
 `attempt`：
 | 字段 | 说明 |

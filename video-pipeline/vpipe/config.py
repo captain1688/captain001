@@ -163,7 +163,8 @@ def price_for(budget, cfg, seg):
 
 # ---------------------------------------------------------------- 工程
 
-def load_project(project_dir, check_images=True):
+def load_project(project_dir, check_images=True, allow_missing_generated=False):
+    """allow_missing_generated=True：带 generate 配置、但图还没生成的角色不报错（用于 --make-refs 和预检）。"""
     project_dir = Path(project_dir).resolve()
     cfg_path = project_dir / "project.json"
     if not cfg_path.exists():
@@ -227,8 +228,21 @@ def load_project(project_dir, check_images=True):
 
     cfg["_characters"] = {}
     for cid, c in chars.items():
-        info = image_info(c.get("image"), f"角色 {cid}")
-        info.update(id=cid, name=c.get("name", cid), ref=c.get("image"))
+        gen = _load_generate(cid, c)
+        target = None
+        if gen:
+            target = (project_dir / c["image"]).resolve()
+            gen["target"] = target
+            gen["references"] = [resolve_image(r, project_dir, assets, f"角色 {cid} 的生成参考图{k + 1}")
+                                 for k, r in enumerate(gen.get("reference_images") or [])]
+        if gen and not target.exists():
+            if not (allow_missing_generated or not check_images):
+                _err(f"角色 {cid} 的参考图还没生成（{target}）。请先运行 --make-refs {cid} 生成并人工确认"
+                     f"（会产生费用，需用户同意）；不会改成纯文字生成。")
+            info = {"path": str(target), "sha256": None, "missing": True}
+        else:
+            info = image_info(c.get("image"), f"角色 {cid}")
+        info.update(id=cid, name=c.get("name", cid), ref=c.get("image"), generate=gen)
         cfg["_characters"][cid] = info
 
     for seg in segs:
@@ -254,6 +268,38 @@ def load_project(project_dir, check_images=True):
     cfg["_narration"] = _load_narration(cfg, ids)
     cfg["_overlay"] = _load_overlay(cfg, ids)
     return cfg
+
+
+def _load_generate(cid, c):
+    """角色参考图的生成配置：{"model", "prompt", "size", "resolution", "reference_images"}。"""
+    g = c.get("generate")
+    if not g:
+        return None
+    if not isinstance(g, dict) or not g.get("model") or not (g.get("prompt") or "").strip():
+        _err(f"角色 {cid} 的 generate 需要 model 和 prompt")
+    img = c.get("image") or ""
+    if not img or img.startswith("asset:"):
+        _err(f"角色 {cid} 要自动生成参考图时，image 必须写成工程内路径（如 refs/{cid}.png），生成结果会保存到那里")
+    if not img.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+        _err(f"角色 {cid} 的 image 需要 .png / .jpg / .webp 后缀")
+    return {"model": g["model"], "prompt": g["prompt"].strip(), "size": g.get("size", "1:1"),
+            "resolution": g.get("resolution"), "reference_images": list(g.get("reference_images") or []),
+            "extra": dict(g.get("extra") or {})}
+
+
+def price_for_image(budget, model, n=1):
+    """角色参考图的单价：价格表里 unit 为 image 的条目。找不到或价格为空 → 拒绝提交。"""
+    for item in budget["pricing"]:
+        if item.get("model") != model or item.get("unit") != "image":
+            continue
+        price, cur = item.get("price"), item.get("currency")
+        if not isinstance(price, (int, float)):
+            _err(f"价格不明：图片模型 {model} 的 price 没有填写。请到 apimart 核对后写入价格表，再生成角色图。")
+        if cur != budget["currency"]:
+            _err(f"图片价格币种 {cur!r} 和预算币种 {budget['currency']!r} 不一致")
+        return {"estimate": round(float(price) * n, 6), "price": float(price), "unit": "image", "currency": cur,
+                "source": item.get("source"), "checked_at": item.get("checked_at")}
+    _err(f"价格不明：价格表里没有图片模型 {model}（unit 为 image）的价格。请核对后写入价格表，再生成角色图。")
 
 
 def _resolve_mode(seg, i, sid):

@@ -93,7 +93,8 @@ def recover_interrupted(state):
     """上次运行停在"已记录提交意图、还没拿到 task_id"的 attempt：请求可能已经发出，
     服务端可能已经接单。统一改成 unknown，等待核对，绝不自动重投。"""
     changed = []
-    for sid, rec in state["segments"].items():
+    items = list(state["segments"].items()) + [(f"角色图 {k}", v) for k, v in state.get("refs", {}).items()]
+    for sid, rec in items:
         for att in rec["attempts"]:
             if att["status"] == "intent":
                 set_status(att, "unknown", "上次运行在提交过程中中断，无法确认服务端是否已接单")

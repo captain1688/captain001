@@ -84,9 +84,16 @@ class Client:
             raise ApiAmbiguous(f"返回内容无法解析：{raw[:200]!r}")
 
     def create_video(self, payload):
-        """提交生成任务。返回 task_id；失败抛 ApiRejected / ApiNotSent / ApiAmbiguous。"""
+        """提交视频生成任务。返回 task_id；失败抛 ApiRejected / ApiNotSent / ApiAmbiguous。"""
+        return self._create("/videos/generations", payload)
+
+    def create_image(self, payload):
+        """提交图片生成任务（角色参考图）。返回值和异常同 create_video。"""
+        return self._create("/images/generations", payload)
+
+    def _create(self, path, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        resp = self._request("POST", "/videos/generations", body, "application/json")
+        resp = self._request("POST", path, body, "application/json")
         crash_point("after_post_before_save")
         try:
             return resp["data"][0]["task_id"]
@@ -149,6 +156,13 @@ def pick_video_url(result):
             return u
     for p, u in urls:
         if u.split("?")[0].lower().endswith((".mp4", ".mov")):
+            return u
+    return None
+
+
+def pick_image_url(result):
+    for p, u in _walk_urls(result):
+        if "image" in p:
             return u
     return None
 

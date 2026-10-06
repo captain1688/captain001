@@ -63,6 +63,9 @@ python video-pipeline/make_video.py video-pipeline/projects/<工程名> --dry-ru
 # 正式生成（用户同意后）：生成 → 旁白 → 剪辑 → 验收
 python video-pipeline/make_video.py video-pipeline/projects/<工程名>
 
+# 生成缺少的角色参考图（会花钱，用户同意后；只处理 project.json 里写了 generate 的角色）
+python video-pipeline/make_video.py video-pipeline/projects/<工程名> --make-refs <角色ID>
+
 # 只合成旁白（edge-tts，免费，需联网；需先 python -m pip install edge-tts）
 python video-pipeline/make_video.py video-pipeline/projects/<工程名> --tts-only
 
@@ -90,6 +93,15 @@ python video-pipeline/make_video.py video-pipeline/projects/<工程名> --allow-
 python video-pipeline/make_video.py video-pipeline/projects/<工程名> --resolve seg2 --attempt <attempt_id> --task-id <任务号>
 python video-pipeline/make_video.py video-pipeline/projects/<工程名> --resolve seg2 --attempt <attempt_id> --not-created
 ```
+
+## 5.1 当前待办工程：`banana_cat_beach`（香蕉猫 · 沙滩一画一毁，15 秒）
+
+1. 用户先在 `batches/main.batch.json` 里填两样东西：`budget.limit`，以及两条 `price`（视频按秒、图片按张）和币种。Codex 不得自填。
+2. 用户在 `video-pipeline/assets.local.json` 里登记 `"xiangjiaomao_main": "本机香蕉猫图片路径"`。
+3. 预检：`python video-pipeline/make_video.py video-pipeline/projects/banana_cat_beach --dry-run`
+4. 征得同意后生成小女孩角色图：`… projects/banana_cat_beach --make-refs girl`。完成后打开 `projects/banana_cat_beach/refs/girl.png`，请用户确认。
+5. 用户确认后再预检一次。征得同意后生成视频：`… projects/banana_cat_beach`
+6. 交付 `output/final.mp4` 和 `output/qc/report.md`。
 
 ## 6. 退出码与处理
 

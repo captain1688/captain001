@@ -560,6 +560,83 @@ class TestAudioAndEdit(Base):
         self.assertIn("预估 0.4 CNY", r.out)
 
 
+class TestMakeRefs(Base):
+    def _project(self, image_price=0.05, max_repairs=0):
+        segs = [{"id": "seg1", "prompt_file": "seg1.txt", "duration": 4, "mode": "reference",
+                 "characters": ["hero", "girl"]}]
+        p = self.make_project(segments=segs, max_repairs=max_repairs)
+        cfg = json.loads((p / "project.json").read_text("utf-8"))
+        cfg["characters"]["girl"] = {"name": "人类小女孩", "image": "refs/girl.png",
+                                     "generate": {"model": "seedream-4.5", "size": "3:4", "resolution": "2K",
+                                                  "prompt": "角色设定图，棕色双马尾小女孩，纯白背景"}}
+        cfg["pricing"].append({"model": "seedream-4.5", "unit": "image", "price": image_price, "currency": "CNY"})
+        (p / "project.json").write_text(json.dumps(cfg, ensure_ascii=False), "utf-8")
+        return p
+
+    def test_missing_generated_ref_blocks_video_until_made(self):
+        p = self._project()
+        r = self.run_pipe(p)
+        self.assertEqual(r.returncode, 1, r.out)
+        self.assertIn("--make-refs girl", r.out)
+        self.assertEqual(self.mock.calls, [])
+        r = self.run_pipe(p, "--dry-run")
+        self.assertEqual(r.returncode, 2, r.out)
+        self.assertIn("需要生成，预估 0.05 CNY", r.out)
+        r = self.run_pipe(p, "--make-refs")
+        self.assertEqual(r.returncode, 0, r.out)
+        self.assertTrue((p / "refs" / "girl.png").exists())
+        self.assertEqual(len(self.mock.image_submits()), 1)
+        self.assertEqual(self.mock.submits(), [], "生成角色图不能顺带生成视频")
+        led = self.ledger(p)
+        self.assertEqual([e["state"] for e in led["entries"].values()], ["spent"])
+        r = self.run_pipe(p, "--make-refs")
+        self.assertEqual(len(self.mock.image_submits()), 1, "已有角色图不能重复生成")
+        r = self.run_pipe(p, "--skip-edit")
+        self.assertEqual(r.returncode, 0, r.out)
+        sub = self.mock.submits()[0]["payload"]
+        self.assertEqual(len(sub["image_urls"]), 2)
+        self.assertIn("图2＝人类小女孩", sub["prompt"])
+
+    def test_make_refs_unknown_price_refuses(self):
+        p = self._project(image_price=None)
+        r = self.run_pipe(p, "--make-refs", "girl")
+        self.assertEqual(r.returncode, 2, r.out)
+        self.assertIn("价格不明", r.out)
+        self.assertEqual(self.mock.image_submits(), [])
+
+    def test_make_refs_never_overwrites_without_permission(self):
+        p = self._project(max_repairs=1)
+        png(p / "refs" / "girl.png", "brown")          # 用户自己放了图
+        before = (p / "refs" / "girl.png").read_bytes()
+        r = self.run_pipe(p, "--make-refs")
+        self.assertEqual(r.returncode, 0, r.out)
+        self.assertEqual(self.mock.image_submits(), [])
+        self.assertEqual((p / "refs" / "girl.png").read_bytes(), before)
+        r = self.run_pipe(p, "--make-refs", "girl", "--allow-regenerate", "girl")
+        self.assertEqual(r.returncode, 0, r.out)
+        self.assertEqual(len(self.mock.image_submits()), 1, "同一次运行只重画一次")
+        self.assertNotEqual((p / "refs" / "girl.png").read_bytes(), before)
+        olds = list((p / "refs" / "_old").glob("girl.*.png"))
+        self.assertEqual(len(olds), 1)
+        self.assertEqual(olds[0].read_bytes(), before, "旧图保留，不删除")
+
+    def test_make_refs_ambiguous_blocks_and_resolves(self):
+        self.mock.image_behaviors = [{"kind": "accept_then_502"}]
+        p = self._project()
+        r = self.run_pipe(p, "--make-refs")
+        self.assertEqual(r.returncode, 2, r.out)
+        self.assertIn("状态不明", r.out)
+        r = self.run_pipe(p, "--make-refs", "--authorize-retry", "girl")
+        self.assertEqual(len(self.mock.image_submits()), 1, "状态不明时不能重投")
+        att = self.state(p)["refs"]["girl"]["attempts"][0]
+        r = self.run_pipe(p, "--resolve", "girl", "--attempt", att["attempt_id"], "--task-id", "task_img_1")
+        self.assertEqual(r.returncode, 0, r.out)
+        r = self.run_pipe(p, "--make-refs")
+        self.assertEqual(r.returncode, 0, r.out)
+        self.assertTrue((p / "refs" / "girl.png").exists())
+        self.assertEqual(len(self.mock.image_submits()), 1)
+
+
 class TestChainAndQc(Base):
     def test_chain_mode_uses_previous_last_frame(self):
         p = self.make_project(segments=[

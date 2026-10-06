@@ -17,6 +17,7 @@ apimart 的 Seedance 2.0 分段生成 → 独立旁白（TTS）+ 互动符号叠
 | 用途 | 命令 | 会花钱吗 |
 |---|---|---|
 | 预检 | `python video-pipeline/make_video.py <工程> --dry-run` | 不联网、不花钱 |
+| 生成缺少的角色参考图 | `… <工程> --make-refs [角色ID…]` | **会**（每张图一次，受预算限制） |
 | 生成→旁白→剪辑→验收 | `python video-pipeline/make_video.py <工程>` | **会**（只在预算内） |
 | 只生成，不剪辑 | `… <工程> --skip-edit` | 会 |
 | 查看记录与预算 | `… <工程> --status` | 不 |
@@ -40,6 +41,12 @@ apimart 的 Seedance 2.0 分段生成 → 独立旁白（TTS）+ 互动符号叠
   - `chain`：用上一段尾帧当首帧。
   - `text`：纯文字生成。
 - 每次尝试都记录角色 ID、每张图的 sha256、完整提示词、配置版本。**参考图、提示词或参数变了，旧结果不再算完成**，必须 `--allow-regenerate` 才重做。
+
+### 1.1 角色参考图生成（`--make-refs`）
+- 角色在 `characters` 里写 `generate`（模型、提示词、比例、分辨率，可选参考图），`image` 写工程内路径，比如 `refs/girl.png`。
+- `--make-refs` 只生成**还不存在**的图，走 apimart 图片接口，和视频一样受预算、提交意图、状态不明的保护；它不会顺带生成视频。
+- 目标图已存在时绝不覆盖。要重画必须加 `--allow-regenerate <角色ID>`，旧图会移到 `refs/_old/`，不删除，每次运行最多重画一次。
+- 图片没生成时，正式生成视频会直接停止，并提示先运行 `--make-refs`。生成后请人工确认长相，再生成视频。
 
 ### 2. 预算硬限制
 - 预算写在批次文件（多条工程共用，见 `batches/example.batch.json`）或工程的 `budget`+`pricing` 里。其中可以独立设置上限、币种、价格、计费单位（`second` 按秒 / `task` 按条），以及每段和每批的修复次数。
