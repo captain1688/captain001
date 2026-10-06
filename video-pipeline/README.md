@@ -1,61 +1,106 @@
-# 自动生成视频 + 剪辑
+# 视频制作管线（v2）
 
-用 apimart 的 Seedance 2.0 生成视频，默认 mini、480p、9:16。多段会**同时提交、同时生成**，生成完自动下载，再用 ffmpeg 拼成一条成片。
+apimart 的 Seedance 2.0 分段生成 → 独立旁白（TTS）+ 互动符号叠加 + 配乐 → 逐段验收。
+入口只有一个：`video-pipeline/make_video.py`。内部模块在 `vpipe/`。
 
-## 一次性准备（在你自己的电脑上）
+> 配置与状态文件的完整字段见 [`docs/SCHEMA.md`](docs/SCHEMA.md)；交给 Codex 的操作说明见 [`docs/CODEX_RUNBOOK.md`](docs/CODEX_RUNBOOK.md)。
 
-1. **装 Python 3 和 ffmpeg**
-   - Windows：`winget install Python.Python.3.12` 和 `winget install Gyan.FFmpeg`
-   - Mac：`brew install python ffmpeg`
-2. **拉取仓库**：`git clone https://github.com/captain1688/captain001.git`，然后切到 `claude/epic-goodall-thd8a8` 分支。
-3. **设置 apimart 的 Key**（在 apimart 网站的 `/zh/keys` 页面获取）：
-   - Windows（PowerShell，永久保存）：`setx APIMART_API_KEY "你的key"`，设置后重开终端才生效。
-   - Mac：在 `~/.zshrc` 里加一行 `export APIMART_API_KEY="你的key"`。
+## 一、准备（每台电脑一次）
 
-Codex 用你的 ChatGPT 会员登录就行，不需要 OpenAI 的 API Key。仓库根目录的 `AGENTS.md` 会告诉 Codex 怎么操作。
+1. Python 3.10+、ffmpeg（含 ffprobe）在 PATH 中。
+2. 要用旁白：`python -m pip install edge-tts`（微软 Edge 在线语音，免费，需联网）。
+3. apimart 的 Key 放在环境变量 `APIMART_API_KEY`。**只有正式生成时才读取**；预检、重剪、验收、测试都不读。
+4. 角色参考图放在你本机任意位置，在 `video-pipeline/assets.local.json` 里登记（模板：`assets.local.example.json`，此文件不进仓库）。
 
-## 让 Codex 干活
+## 二、命令（在仓库根目录运行）
 
-在仓库目录里打开 Codex，直接说，例如：
+| 用途 | 命令 | 会花钱吗 |
+|---|---|---|
+| 预检 | `python video-pipeline/make_video.py <工程> --dry-run` | 不联网、不花钱 |
+| 生成→旁白→剪辑→验收 | `python video-pipeline/make_video.py <工程>` | **会**（只在预算内） |
+| 只生成，不剪辑 | `… <工程> --skip-edit` | 会 |
+| 查看记录与预算 | `… <工程> --status` | 不 |
+| 只合成旁白 | `… <工程> --tts-only` | 不（edge-tts 免费，需联网） |
+| 独立重剪 + 验收 | `… <工程> --edit-only` | 不（只用已有素材和已缓存旁白） |
+| 只重新验收 | `… <工程> --qc-only` | 不 |
+| 授权重试失败段 | `… <工程> --authorize-retry seg2` | 会 |
+| 输入变了，授权重新生成 | `… <工程> --allow-regenerate seg2`（或 `all`） | 会 |
+| 核对"状态不明" | `… <工程> --resolve seg2 --attempt <ID> --task-id <任务号>` 或 `--not-created` | 不 |
 
-> 用 projects/xueren 生成视频。
+退出码：`0` 完成；`1` 配置错误/被拒（缺图、旁白念了符号名等）；`2` 有分段未完成或被阻塞（超预算、价格不明、状态不明、等待授权）；`3` 成片已出但自动验收不通过；`77` 只在测试中断注入时出现。
 
-> 把《刀盾狗的宝箱》做成一个新工程并生成，首帧图我放在 refs 里了。
+## 三、它保证什么、不保证什么
 
-Codex 会先预检，告诉你要花多少秒的生成量，等你同意后才正式生成。
+### 1. 角色参考图交接
+- `characters` 声明每个角色用哪张图（工程内路径，或 `asset:<key>` 指向本地素材清单）。每段用 `characters` 写明出场角色。
+- 生成前逐张检查：文件存在、格式是 png/jpeg/gif/webp、≤20MB、**能被 ffmpeg 真正解码**。任一缺失或损坏 → 停止。**任何情况下都不会自动退回纯文字生成**；要纯文字必须写 `"mode": "text"`，而且这种段不能声明角色。
+- 模式：
+  - `first_frame`：首帧图承载角色外观。角色参考图只做校验和哈希记录，不发给接口（apimart 规定首帧和参考图不能同时用）。
+  - `reference`：角色图按顺序作为参考图发送，并在提示词前自动加一行"图1＝某角色"。
+  - `chain`：用上一段尾帧当首帧。
+  - `text`：纯文字生成。
+- 每次尝试都记录角色 ID、每张图的 sha256、完整提示词、配置版本。**参考图、提示词或参数变了，旧结果不再算完成**，必须 `--allow-regenerate` 才重做。
 
-## 自己手动跑
+### 2. 预算硬限制
+- 预算写在批次文件（多条工程共用，见 `batches/example.batch.json`）或工程的 `budget`+`pricing` 里。其中可以独立设置上限、币种、价格、计费单位（`second` 按秒 / `task` 按条），以及每段和每批的修复次数。
+- **没有预算 → 拒绝提交。价格为空或对不上 → 拒绝提交。币种不一致 → 拒绝提交（不做汇率）。**
+- 每次提交前，在账本锁内一次性完成"检查＋预占"：`已花费 + 在途预占 + 本次` ≤ 上限，才写入预占。多个进程共用一个批次也不会各自通过、合起来超支（有并发测试）。
+- 预占只在确认失败或确认未创建时释放。**超时、状态不明一律不释放。** 服务端明确失败但没给费用时，默认按已花费保守记账（可用 `release_failed_without_cost` 改）。
+- 旧版（升级前）在途的任务没有预占记录，提交新任务时也按当前价格算进"在途"。
 
-```bash
-python video-pipeline/make_video.py video-pipeline/projects/xueren --dry-run    # 预检，不花钱
-python video-pipeline/make_video.py video-pipeline/projects/xueren              # 生成 + 剪辑
-python video-pipeline/make_video.py video-pipeline/projects/xueren --edit-only  # 只重新剪辑
+### 3. 防重复扣费
+- 同一工程同时只能跑一个进程（运行锁，进程崩溃时由系统自动释放）。
+- 状态文件和账本都用"临时文件 → fsync → 原子替换"写入，断电不会留下写了一半的文件。
+- 提交顺序是：记录提交意图（attempt ID、请求指纹、预占）→ 落盘 → 发请求 → 拿到 task ID **立即**落盘。
+- 失败分类：
+  - 明确 4xx 拒绝、请求没发出去：确认没有任务，释放预占。
+  - 超时、连接中断、5xx、返回无法解析，以及进程在发请求前后被杀：**状态不明**。这时保留预占，阻塞本段，等人工到 apimart 控制台核对后用 `--resolve` 处理。核对前**任何参数都不会让它重投**（包括 `--authorize-retry`）。
+- 所有尝试永久保留（含失败的 task ID 和服务端完整返回），新尝试另起 ID，需要 `--authorize-retry`，且受修复次数和预算限制。
+- **限制：** apimart 文档没有提供幂等键，也没有"按内容查任务"的接口。所以服务端在"已接单、但回包丢失"这一窗口内，管线只能识别并阻止自动重投，**不能从技术上绝对保证服务端不出现重复任务**。
+
+### 4. 旁白与互动符号时间轴
+- 旁白每行绑定一个分段，`start` 是相对该段开头的秒数。旁白独立合成：edge-tts 提供 WordBoundary 词级时间戳。音频和时间戳按内容哈希缓存在 `.cache/tts/`。
+- 符号事件 = `分段 ID + 旁白行 ID + 锚点`。锚点可以是：
+  - `{"text": "这个", "occurrence": 2}`：只在**这一行旁白**的词时间戳里找第 2 次出现，不做全文搜索。
+  - `{"word_index": 5}`
+  - `{"time": 3.2}`：手动指定，会标为"手动、未对齐"。
+- 每个事件都明确：开始＝词开始 − `lead`；结束＝词结束 + `hold`，或 `end_anchor` 词结束；位置用 `position.x/y`，取值 0～1，相对画面宽高；大小用 `size`，相对画面宽度。
+- 合成时按各段实际时长算偏移，旁白说到"这个"时对应符号出现。
+- 支持红＋（plus）、红心（heart）、金星（star）、666、分享箭头（share）。每条视频用 `enabled_symbols` 选择要展示哪些。旁白文字里出现"加号、爱心、五角星、星星、666、分享、转发"等词会直接报错。
+- 词时间戳缺失、和原文对不上、或者第 N 次出现不存在时，**明确报出并拒绝合成**，不会假装对齐。确认要先出一版时，加 `--allow-unaligned` 跳过这些事件，验收报告里会列出被跳过的事件。
+
+### 5. 混音
+- 原声 × `original_volume` ＋ 旁白 × `narration_volume` 组成人声总线。配乐 × `bgm_volume` 在人声出现时自动压低（`duck`）。总线统一到 −14 LUFS，最后过限幅器。
+- 有的片段有声、有的无声时，**只给无声片段补等长静音**，其他片段的原声保留。
+- 旁白或符号超出成片结尾 → 报错，**不截断旁白**。
+- `--edit-only` 只用已下载的片段和已缓存的旁白，不会访问 apimart，也不会合成 TTS。
+- 配乐库按情绪分文件夹放在 `music/`，用法见 `music/README.md`（只放有使用权的音乐，不进仓库）。
+
+### 6. 逐段验收（`output/qc/report.md`）
+- 自动检查：完整解码、画幅、分辨率、时长、音轨、黑帧、时间轴越界、符号事件覆盖和对齐情况。
+- 联系图：每段一张，外加成片一张。另有一张"符号检查图"，在每个符号事件的中点各截一帧。
+- **待人工确认**（不做自动判断）：角色是否变脸、动作是否兑现、画面里生成的符号对不对、口型、衔接、整体音量。
+- 验收不通过只出报告，**不会自动付费返工**。
+
+## 四、离线测试
+
+```
+python -m unittest discover -s video-pipeline/tests -v
 ```
 
-## 工程目录长这样
+测试全部在本机进行：起一个 apimart 模拟服务器，用假密钥，不读你的真实环境变量，不联网，约 3 分钟。覆盖：
+- 缺图、坏图、素材清单缺 key、纯文字＋角色被拒、参考图变更、参考图模式的角色映射
+- 价格不明、没有预算、单工程超预算、两个进程并发共用预算、旧版在途任务计入预算
+- 重复启动、写状态时断电、提交成功但没存 ID、502 状态不明及人工核对、失败后授权重试与修复上限、明确拒绝时释放预占、旧版状态迁移、上传失败
+- 多次"这个"的定位、第 N 次不存在、旁白念符号名、没有词时间戳、全功能合成（5 种符号＋配乐＋验收，并验证符号确实画在画面上）
+- 有声无声混剪、独立重剪不访问接口和 TTS、预检不需要密钥、接尾帧模式、旁白越界、验收失败不返工
 
-```
-projects/xueren/
-├── project.json        # 配置：模型、分辨率、每段时长、首帧图、配乐
-├── seg1.txt            # 上段提示词
-├── seg2.txt            # 下段提示词
-├── refs/               # 首帧图，以及首帧图的图片提示词（README.md）
-└── output/             # 自动生成：seg1.mp4、seg2.mp4、final.mp4、state.json
-```
+## 五、从 v1 工程迁移
 
-`project.json` 里每段可以写：
+旧工程（如 `projects/xueren`、`projects/xiangjiaomao`）可以照常查看状态、重剪、验收，也能继续查询升级前已提交的任务。旧的 `state.json` 会自动迁移，原记录不丢。
 
-| 字段 | 作用 |
-|---|---|
-| `first_frame` | 首帧图。推荐每段都给一张，各段就能并发生成 |
-| `continue_from_previous: true` | 用上一段的尾帧当首帧，衔接最顺，但要等上一段生成完才能开始 |
-| `reference_images` | 参考图，最多 9 张。**不能和上面两项同时用**（apimart 的限制） |
-| `duration` | 4～15 秒 |
+**提交新的付费任务前**，需要补两样：
+1. `characters`，以及每段的 `characters`。
+2. `batch`（或 `budget` + `pricing`）。
 
-## 要知道的几件事
-
-- **中断不怕**：中途关掉终端，重新运行会接着查询已提交的任务，不会重复扣费。
-- **重做某一段**：删掉 `output/seg2.mp4`，再删掉 `state.json` 里 `seg2` 那一项，然后重新运行。
-- **配乐**：把音乐按情绪放进 `video-pipeline/music/` 下的文件夹（欢快、温馨、搞笑、梦幻、悬念），剪辑时会自动选曲、循环、淡入淡出、说话时压低音乐、统一响度。详见 `music/README.md`。想换歌或调音量，就改 `project.json` 的 `edit`，再用 `--edit-only` 重剪，不花生成费。
-- **上传的首帧图在 apimart 只保存 72 小时**：脚本会在过期前自动重新上传。
-- **提示词长度**：官方建议 mini 模型的中文提示词控制在 500 字以内，太长可能导致部分细节被忽略。现在每段大约 1800 字，如果发现某些细节总是没出来，可以考虑精简。
+旧版"已完成"的段没有输入指纹，按已完成处理，但验收报告里会标为待人工确认。

@@ -1,0 +1,57 @@
+{
+  "title": "示例：香蕉猫的三个宝贝（v2 全功能示例）",
+  "model": "seedance-2.0-mini",
+  "resolution": "480p",
+  "size": "9:16",
+  "generate_audio": true,
+  "batch": "../../batches/example.batch.json",
+  "characters": {
+    "xiangjiaomao": {"name": "香蕉猫", "image": "asset:xiangjiaomao_main"}
+  },
+  "segments": [
+    {"id": "seg1", "prompt_file": "seg1.txt", "duration": 8, "mode": "first_frame",
+     "first_frame": "refs/seg1_first_frame.png", "characters": ["xiangjiaomao"]},
+    {"id": "seg2", "prompt_file": "seg2.txt", "duration": 8, "mode": "first_frame",
+     "first_frame": "refs/seg2_first_frame.png", "characters": ["xiangjiaomao"]}
+  ],
+  "narration": {
+    "provider": "edge",
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+0%",
+    "volume": 1.0,
+    "lines": [
+      {"id": "n1", "segment": "seg1", "start": 1.0, "text": "我有三个宝贝：这个、这个，还有这个！"},
+      {"id": "n2", "segment": "seg2", "start": 1.5, "text": "你们说厉不厉害？快带上好朋友一起来看！"}
+    ]
+  },
+  "overlay": {
+    "enabled_symbols": ["plus", "heart", "star", "666", "share"],
+    "size": 0.24,
+    "hold": 0.9,
+    "fade": 0.12,
+    "require_all_enabled": true,
+    "events": [
+      {"id": "plus_1", "symbol": "plus", "segment": "seg1", "narration": "n1",
+       "anchor": {"text": "这个", "occurrence": 1}, "position": {"x": 0.25, "y": 0.28}},
+      {"id": "heart_2", "symbol": "heart", "segment": "seg1", "narration": "n1",
+       "anchor": {"text": "这个", "occurrence": 2}, "position": {"x": 0.5, "y": 0.28}},
+      {"id": "star_3", "symbol": "star", "segment": "seg1", "narration": "n1",
+       "anchor": {"text": "这个", "occurrence": 3}, "position": {"x": 0.75, "y": 0.28}, "hold": 1.5},
+      {"id": "six_1", "symbol": "666", "segment": "seg2", "narration": "n2",
+       "anchor": {"text": "厉害"}, "position": {"x": 0.5, "y": 0.22}, "size": 0.4},
+      {"id": "share_1", "symbol": "share", "segment": "seg2", "narration": "n2",
+       "anchor": {"text": "好朋友"}, "end_anchor": {"text": "来看"}, "position": {"x": 0.82, "y": 0.72}}
+    ]
+  },
+  "edit": {
+    "output": "final.mp4",
+    "original_volume": 0.6,
+    "narration_volume": 1.0,
+    "bgm": "auto",
+    "bgm_mood": "欢快",
+    "bgm_volume": 0.25,
+    "duck": true,
+    "loudnorm": true
+  },
+  "qc": {"duration_tolerance": 0.6, "black_min": 0.5}
+}

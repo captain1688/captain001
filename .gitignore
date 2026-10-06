@@ -7,3 +7,10 @@ video-pipeline/music/**/*.m4a
 video-pipeline/music/**/*.aac
 video-pipeline/music/**/*.flac
 video-pipeline/music/**/*.ogg
+# v2 管线：本地素材清单、TTS 缓存、批次账本、示例工程的私有图片
+video-pipeline/assets.local.json
+video-pipeline/projects/*/assets.local.json
+video-pipeline/.cache/
+video-pipeline/batches/*.ledger.json
+video-pipeline/batches/*.ledger.json.lock
+video-pipeline/projects/example_v2/refs/*.png

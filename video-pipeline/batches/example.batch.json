@@ -1,0 +1,24 @@
+{
+  "batch_id": "example-2026-10",
+  "_说明": "一个批次 = 共用一个预算和账本的一组工程。账本文件 example.batch.ledger.json 会自动生成在本文件旁边（不进仓库）。",
+  "budget": {
+    "limit": 10,
+    "currency": "USD",
+    "max_repairs_per_segment": 1,
+    "max_repairs_total": 3,
+    "release_failed_without_cost": false,
+    "actual_cost_currency": null
+  },
+  "pricing": [
+    {
+      "model": "seedance-2.0-mini",
+      "resolution": "480p",
+      "generate_audio": true,
+      "unit": "second",
+      "price": null,
+      "currency": "USD",
+      "source": "请到 https://apimart.ai/zh/model/doubao-seedance-2-0 核对后填写 price；价格为空时管线会拒绝提交",
+      "checked_at": null
+    }
+  ]
+}
