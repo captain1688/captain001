@@ -357,14 +357,44 @@ def generate(cfg, project_dir, out_dir, api_key, dry_run):
 
 # ---------------------------------------------------------------- 剪辑
 
+MUSIC_DIR = Path(__file__).resolve().parent / "music"
+AUDIO_EXT = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
+
+
 def probe(video):
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(video)],
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(video)],
                          check=True, capture_output=True, text=True).stdout
-    streams = json.loads(out)["streams"]
+    info = json.loads(out)
+    streams = info["streams"]
     v = next(s for s in streams if s["codec_type"] == "video")
     num, den = v["r_frame_rate"].split("/")
     return {"w": int(v["width"]), "h": int(v["height"]), "fps": float(num) / float(den),
+            "duration": float(info["format"]["duration"]),
             "audio": any(s["codec_type"] == "audio" for s in streams)}
+
+
+def resolve_bgm(edit_cfg, project_dir):
+    """bgm 可以是：不填（不配乐）／"auto"（按 bgm_mood 从音乐库自动选）／文件名。"""
+    bgm = (edit_cfg.get("bgm") or "").strip()
+    if not bgm:
+        return None
+    if bgm == "auto":
+        mood = edit_cfg.get("bgm_mood") or "欢快"
+        folder = MUSIC_DIR / mood
+        tracks = sorted(p for p in folder.glob("*") if p.suffix.lower() in AUDIO_EXT) if folder.is_dir() else []
+        if not tracks:
+            # 不中断：视频已经付费生成了，先出无配乐成片，补好音乐后用 --edit-only 重剪
+            log(f"  [提醒] 音乐库里没有\"{mood}\"类的曲子（{folder}），这次先不配乐")
+            return None
+        # 同一个工程每次选同一首，不同工程分散到不同曲子
+        idx = sum(project_dir.name.encode("utf-8")) % len(tracks)
+        return tracks[idx]
+    for base in (project_dir, MUSIC_DIR):
+        p = (base / bgm)
+        if p.exists():
+            return p
+    log(f"  [提醒] 找不到配乐文件 {bgm}（工程目录和 {MUSIC_DIR} 里都没有），这次先不配乐")
+    return None
 
 
 def edit(cfg, project_dir, out_dir):
@@ -380,10 +410,7 @@ def edit(cfg, project_dir, out_dir):
         log("  有片段没有音轨，成片将不保留原声")
 
     edit_cfg = cfg.get("edit", {})
-    bgm = edit_cfg.get("bgm")
-    bgm_path = project_dir / bgm if bgm else None
-    if bgm_path and not bgm_path.exists():
-        die(f"配乐文件不存在：{bgm_path}")
+    bgm_path = resolve_bgm(edit_cfg, project_dir)
 
     args = ["ffmpeg", "-y", "-loglevel", "error"]
     for f in files:
@@ -393,9 +420,11 @@ def edit(cfg, project_dir, out_dir):
 
     one_frame = 1.0 / fps
     parts, concat_in = [], ""
+    total = 0.0
     for i, seg in enumerate(segs):
         # 续接段的第一帧就是上一段的尾帧，去掉这一帧避免画面"顿一下"
         trim = one_frame if seg.get("continue_from_previous") else 0
+        total += infos[i]["duration"] - trim
         parts.append(f"[{i}:v]trim=start={trim},setpts=PTS-STARTPTS,"
                      f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
                      f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}[v{i}]")
@@ -410,30 +439,47 @@ def edit(cfg, project_dir, out_dir):
     else:
         parts.append(f"{concat_in}concat=n={n}:v=1:a=0[vout]")
 
-    amap = None
+    mix = None
     if bgm_path:
         vol = float(edit_cfg.get("bgm_volume", 0.3))
-        parts.append(f"[{n}:a]volume={vol},aresample=48000,aformat=channel_layouts=stereo[bgm]")
+        fade_in = float(edit_cfg.get("bgm_fade_in", 0.5))
+        fade_out = float(edit_cfg.get("bgm_fade_out", 1.5))
+        parts.append(f"[{n}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,volume={vol},"
+                     f"afade=t=in:d={fade_in},afade=t=out:st={max(total - fade_out, 0):.3f}:d={fade_out},"
+                     f"aresample=48000,aformat=channel_layouts=stereo[bgm]")
         if keep_audio:
-            parts.append("[aseq][bgm]amix=inputs=2:duration=first:normalize=0[aout]")
+            if edit_cfg.get("duck", True):
+                # 有台词/音效时自动压低配乐，说完再恢复
+                parts.append("[aseq]asplit=2[voice][sc]")
+                parts.append("[bgm][sc]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=400[bgmd]")
+                parts.append("[voice][bgmd]amix=inputs=2:duration=first:normalize=0[mix]")
+            else:
+                parts.append("[aseq][bgm]amix=inputs=2:duration=first:normalize=0[mix]")
         else:
-            parts.append("[bgm]anull[aout]")
-        amap = "[aout]"
+            parts.append("[bgm]anull[mix]")
+        mix = "[mix]"
+        log(f"  配乐：{bgm_path.name}（音量 {vol}）")
     elif keep_audio:
-        amap = "[aseq]"
+        mix = "[aseq]"
+
+    amap = None
+    if mix:
+        if edit_cfg.get("loudnorm", True):
+            # 统一到短视频平台常用响度，避免忽大忽小
+            parts.append(f"{mix}loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]")
+            amap = "[aout]"
+        else:
+            amap = mix
 
     final = out_dir / edit_cfg.get("output", "final.mp4")
     args += ["-filter_complex", ";".join(parts), "-map", "[vout]"]
     if amap:
         args += ["-map", amap, "-c:a", "aac", "-b:a", "192k"]
     args += ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p",
-             "-movflags", "+faststart"]
-    if bgm_path and not keep_audio:
-        args.append("-shortest")  # 配乐是循环的，以画面长度为准
-    args.append(str(final))
+             "-movflags", "+faststart", "-t", f"{total:.3f}", str(final)]
     log("\n=== 剪辑 ===")
     subprocess.run(args, check=True)
-    log(f"  成片：{final}")
+    log(f"  成片：{final}（{total:.1f} 秒）")
     return final
 
 

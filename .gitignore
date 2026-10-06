@@ -1,3 +1,9 @@
 video-pipeline/projects/*/output/
 __pycache__/
 *.part
+video-pipeline/music/**/*.mp3
+video-pipeline/music/**/*.wav
+video-pipeline/music/**/*.m4a
+video-pipeline/music/**/*.aac
+video-pipeline/music/**/*.flac
+video-pipeline/music/**/*.ogg

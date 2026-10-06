@@ -20,7 +20,8 @@
   ],
   "edit": {
     "output": "final.mp4",
-    "bgm": null,
+    "bgm": "auto",
+    "bgm_mood": "欢快",
     "bgm_volume": 0.3
   }
 }
