@@ -1,0 +1,3 @@
+video-pipeline/projects/*/output/
+__pycache__/
+*.part
