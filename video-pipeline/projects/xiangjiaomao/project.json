@@ -1,0 +1,26 @@
+{
+  "title": "香蕉猫不想睡",
+  "model": "seedance-2.0-mini",
+  "resolution": "480p",
+  "size": "9:16",
+  "generate_audio": true,
+  "segments": [
+    {
+      "id": "seg1",
+      "prompt_file": "seg1.txt",
+      "duration": 10,
+      "first_frame": "refs/seg1_first_frame.png"
+    },
+    {
+      "id": "seg2",
+      "prompt_file": "seg2.txt",
+      "duration": 10,
+      "first_frame": "refs/seg2_first_frame.png"
+    }
+  ],
+  "edit": {
+    "output": "final.mp4",
+    "bgm": null,
+    "bgm_volume": 0.3
+  }
+}
